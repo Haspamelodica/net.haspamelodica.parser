@@ -15,19 +15,18 @@ import net.haspamelodica.parser.parser.lrk.action.Action;
 import net.haspamelodica.parser.parser.lrk.action.ErrorAction;
 import net.haspamelodica.parser.parser.lrk.action.FinishAction;
 import net.haspamelodica.parser.parser.lrk.action.ReduceAction;
-import net.haspamelodica.parser.parser.lrk.canonicalautomaton.State;
 import net.haspamelodica.parser.tokenizer.TokenStream;
 import net.haspamelodica.parser.tokenizer.TokenizingException;
 
-public class LRkParserExecution
+public class LRkParserExecution<STATE>
 {
-	private final LRkParser		lrkParser;
-	private final TokenStream	tokens;
+	private final GenericLRkParser<STATE>	lrkParser;
+	private final TokenStream				tokens;
 
 	private Queue<Token<?>>	lookaheadTokens;
 	private Word			lookahead;
 
-	public LRkParserExecution(LRkParser lrkParser, TokenStream tokens)
+	public LRkParserExecution(GenericLRkParser<STATE> lrkParser, TokenStream tokens)
 	{
 		this.lrkParser = lrkParser;
 		this.tokens = tokens;
@@ -38,13 +37,13 @@ public class LRkParserExecution
 
 	public InnerNode parse() throws ParseException
 	{
-		Stack<State> stateStack = new Stack<>();
+		Stack<STATE> stateStack = new Stack<>();
 		Stack<ASTNode<?>> astNodeStack = new Stack<>();
 		stateStack.push(lrkParser.getInitialState());
 		astNodeStack.push(null);
 		for(;;)
 		{
-			State currentState = stateStack.peek();
+			STATE currentState = stateStack.peek();
 			Word lookahead = getLookahead();
 			Action action = lookupAction(currentState, lookahead);
 			switch(action.getType())
@@ -85,12 +84,12 @@ public class LRkParserExecution
 		}
 	}
 
-	private State lookupGoto(State currentState, Symbol symbol)
+	private STATE lookupGoto(STATE currentState, Symbol symbol)
 	{
 		return lrkParser.getGotoTable().getOrDefault(currentState, Collections.emptyMap()).get(symbol);
 	}
 
-	private Action lookupAction(State currentState, Word lookahead)
+	private Action lookupAction(STATE currentState, Word lookahead)
 	{
 		return lrkParser.getActionTable().getOrDefault(currentState, Collections.emptyMap()).getOrDefault(lookahead, ErrorAction.INSTANCE);
 	}

@@ -1,102 +1,20 @@
 package net.haspamelodica.parser.parser.lrk;
 
 import java.util.Map;
-import java.util.Map.Entry;
-import java.util.stream.Collectors;
 
-import net.haspamelodica.parser.ast.InnerNode;
 import net.haspamelodica.parser.grammar.Symbol;
-import net.haspamelodica.parser.parser.ParseException;
-import net.haspamelodica.parser.parser.Parser;
 import net.haspamelodica.parser.parser.lrk.action.Action;
 import net.haspamelodica.parser.parser.lrk.canonicalautomaton.CanonicalAutomaton;
 import net.haspamelodica.parser.parser.lrk.canonicalautomaton.State;
-import net.haspamelodica.parser.tokenizer.TokenStream;
 
-public class LRkParser implements Parser
+public class LRkParser extends GenericLRkParser<State>
 {
-	private final State								initialState;
-	private final Map<State, Map<Symbol, State>>	gotoTable;
-	private final Map<State, Map<Word, Action>>		actionTable;
-	private final int								lookaheadSize;
-
 	public LRkParser(CanonicalAutomaton canonicalAutomaton, Map<State, Map<Word, Action>> actionTable, int lookaheadSize)
 	{
-		this.initialState = canonicalAutomaton.getInitialState();
-		this.gotoTable = canonicalAutomaton.getGotoTable();
-		this.actionTable = deepCopy(actionTable);
-		this.lookaheadSize = lookaheadSize;
+		this(canonicalAutomaton.getInitialState(), canonicalAutomaton.getGotoTable(), actionTable, lookaheadSize);
 	}
-
-	private Map<State, Map<Word, Action>> deepCopy(Map<State, Map<Word, Action>> actionTable)
+	public LRkParser(State initialState, Map<State, Map<Symbol, State>> gotoTable, Map<State, Map<Word, Action>> actionTable, int lookaheadSize)
 	{
-		return actionTable.entrySet().stream().collect(Collectors.toUnmodifiableMap(Entry::getKey, e -> Map.copyOf(e.getValue())));
-	}
-
-	@Override
-	public InnerNode parse(TokenStream tokens) throws ParseException
-	{
-		return new LRkParserExecution(this, tokens).parse();
-	}
-
-	public State getInitialState()
-	{
-		return initialState;
-	}
-	public Map<State, Map<Symbol, State>> getGotoTable()
-	{
-		return gotoTable;
-	}
-	public Map<State, Map<Word, Action>> getActionTable()
-	{
-		return actionTable;
-	}
-	public int getLookaheadSize()
-	{
-		return lookaheadSize;
-	}
-
-	@Override
-	public int hashCode()
-	{
-		final int prime = 31;
-		int result = 1;
-		result = prime * result + ((actionTable == null) ? 0 : actionTable.hashCode());
-		result = prime * result + ((gotoTable == null) ? 0 : gotoTable.hashCode());
-		result = prime * result + ((initialState == null) ? 0 : initialState.hashCode());
-		result = prime * result + lookaheadSize;
-		return result;
-	}
-	@Override
-	public boolean equals(Object obj)
-	{
-		if(this == obj)
-			return true;
-		if(obj == null)
-			return false;
-		if(getClass() != obj.getClass())
-			return false;
-		LRkParser other = (LRkParser) obj;
-		if(actionTable == null)
-		{
-			if(other.actionTable != null)
-				return false;
-		} else if(!actionTable.equals(other.actionTable))
-			return false;
-		if(gotoTable == null)
-		{
-			if(other.gotoTable != null)
-				return false;
-		} else if(!gotoTable.equals(other.gotoTable))
-			return false;
-		if(initialState == null)
-		{
-			if(other.initialState != null)
-				return false;
-		} else if(!initialState.equals(other.initialState))
-			return false;
-		if(lookaheadSize != other.lookaheadSize)
-			return false;
-		return true;
+		super(initialState, gotoTable, actionTable, lookaheadSize);
 	}
 }
