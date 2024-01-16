@@ -50,7 +50,6 @@ public class LRkParserGenerator
 
 	private LRkParser generate()
 	{
-
 		for(State state : canonicalAutomaton.getStates())
 		{
 			Map<Word, Action> actionsCurrentState = new HashMap<>();
@@ -80,7 +79,7 @@ public class LRkParserGenerator
 			actionTable.put(state, actionsCurrentState);
 		}
 
-		return new LRkParser(canonicalAutomaton, actionTable, lookaheadSize);
+		return new LRkParser(canonicalAutomaton, grammarWasNormalized ? grammar.getStartSymbol() : null, actionTable, lookaheadSize);
 	}
 
 	private void setActionTableEntry(State state, Map<Word, Action> actionsCurrentState, Action action, Word lookahead)

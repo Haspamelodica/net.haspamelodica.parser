@@ -7,12 +7,18 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Map.Entry;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+import net.haspamelodica.parser.grammar.ContextFreeGrammar;
 import net.haspamelodica.parser.grammar.Nonterminal;
 import net.haspamelodica.parser.grammar.Production;
 import net.haspamelodica.parser.grammar.RightHandSide;
@@ -46,71 +52,45 @@ public class LRkParserSerializer
 			DataOutputStream out) throws IOException
 	{
 		out.writeInt(PARSER_VERSION_MAGIC);
-		out.writeInt(parser.getLookaheadSize());
 
-		// create mapping of nonterminal <-> id and terminal <-> id
-		Map<Nonterminal, Integer> idsByNonterminal = new HashMap<>();
-		List<Nonterminal> nonterminalsById = new ArrayList<>();
-		int nonterminalCount = 0;
-		Map<Terminal<?>, Integer> idsByTerminal = new HashMap<>();
-		List<Terminal<?>> terminalsById = new ArrayList<>();
-		int terminalCount = 0;
-		Stream<Symbol> allSymbols = Stream.concat(
-				parser
-						.getActionTable()
-						.values()
-						.stream()
-						.map(Map::entrySet)
-						.flatMap(Set::stream)
-						.flatMap(e -> Stream.concat(e.getKey().getTerminals().stream(), switch(e.getValue().getType())
-						{
-							case ERROR, SHIFT -> Stream.empty();
-							case REDUCE -> streamProductionSymbols(((ReduceAction) e.getValue()).getProduction());
-							case FINISH -> streamProductionSymbols(((FinishAction) e.getValue()).getProduction());
-						})),
-				parser
-						.getGotoTable()
-						.values()
-						.stream()
-						.map(Map::keySet)
-						.flatMap(Set::stream));
-		for(Symbol symbol : (Iterable<Symbol>) allSymbols::iterator)
-			switch(symbol.getType())
-			{
-				case NONTERMINAL ->
-				{
-					Nonterminal nonterminal = (Nonterminal) symbol;
-					if(idsByNonterminal.get(nonterminal) == null)
-					{
-						idsByNonterminal.put(nonterminal, nonterminalCount);
-						nonterminalsById.add(nonterminal);
-						nonterminalCount ++;
-					}
-				}
-				case TERMINAL ->
-				{
-					Terminal<?> terminal = (Terminal<?>) symbol;
-					if(idsByTerminal.get(terminal) == null)
-					{
-						idsByTerminal.put(terminal, terminalCount);
-						terminalsById.add(terminal);
-						terminalCount ++;
-					}
-				}
-			}
-		out.writeInt(nonterminalCount);
-		out.writeInt(terminalCount);
-		Map<Symbol, Integer> idsBySymbol = new HashMap<>(idsByTerminal);
-		int terminalCountFinal = terminalCount;
-		idsByNonterminal.forEach((nonterminal, id) -> idsBySymbol.put(nonterminal, id + terminalCountFinal));
+		Symbols symbols = categorizeSymbols(parser);
+		// lookahead size and whether we have a generated start symbol
+		boolean hasGeneratedStart = symbols.generatedStartSymbol().isPresent();
+		out.writeInt(parser.getLookaheadSize() * (hasGeneratedStart ? -1 : 1));
+
+		// create mapping of id -> nonterminal (except generated start) and id -> terminal (except EOF)
+		List<Nonterminal> nonterminalsById = List.copyOf(symbols.nonterminalsExceptGeneratedStart());
+		List<Terminal<?>> terminalsByIdModifiable = new ArrayList<>(symbols.terminals());
+
+		out.writeInt(nonterminalsById.size());
+		out.writeInt(terminalsByIdModifiable.size());
 
 		// terminals
-		for(Terminal<?> terminal : terminalsById)
+		for(Terminal<?> terminal : symbols.terminals())
 			serializeTerminal.accept(terminal, out);
 
-		// nonterminals
+		// nonterminals (except generated start)
 		for(Nonterminal nonterminal : nonterminalsById)
 			serializeNonterminal.accept(nonterminal, out);
+
+		terminalsByIdModifiable.add(0, Terminal.EOF);
+		List<Terminal<?>> terminalsById = List.copyOf(terminalsByIdModifiable);
+
+		if(hasGeneratedStart)
+		{
+			List<Nonterminal> nonterminalsByIdNew = new ArrayList<>(nonterminalsById.size() + 1);
+			nonterminalsByIdNew.add(symbols.generatedStartSymbol().get());
+			nonterminalsByIdNew.addAll(nonterminalsById);
+			nonterminalsById = List.copyOf(nonterminalsByIdNew);
+		}
+
+		// create mapping of nonterminal -> id and terminal -> id
+		Map<Nonterminal, Integer> idsByNonterminal = IntStream.range(0, nonterminalsById.size())
+				.boxed().collect(Collectors.toUnmodifiableMap(nonterminalsById::get, Function.identity()));
+		Map<Terminal<?>, Integer> idsByTerminal = IntStream.range(0, terminalsById.size())
+				.boxed().collect(Collectors.toUnmodifiableMap(terminalsById::get, Function.identity()));
+		Map<Symbol, Integer> idsBySymbol = new HashMap<>(idsByTerminal);
+		idsByNonterminal.forEach((nonterminal, id) -> idsBySymbol.put(nonterminal, id + terminalsById.size()));
 
 		// create mapping of state <-> id
 		Map<STATE, Integer> idsByState = new HashMap<>();
@@ -177,11 +157,6 @@ public class LRkParserSerializer
 				throw new IllegalArgumentException("Map isn't sane");
 		}
 	}
-	private static Stream<Symbol> streamProductionSymbols(Production production)
-	{
-		return Stream.concat(Stream.of(production.getLhs()), production.getRhs().getSymbols().stream());
-	}
-
 	public static GenericLRkParser<?> deserialize(InputStream in,
 			IOFunction<DataInputStream, Terminal<?>> deserializeTerminal,
 			IOFunction<DataInputStream, Nonterminal> deserializeNonterminal) throws IOException, VersionMagicMismatchException
@@ -194,14 +169,24 @@ public class LRkParserSerializer
 	{
 		checkVersion(PARSER_VERSION_MAGIC, in.readInt(), "Parser version mismatch");
 		int lookaheadSize = in.readInt();
+		boolean hasGeneratedStart = lookaheadSize < 0;
+		lookaheadSize = Math.abs(lookaheadSize);
 
 		int nonterminalCount = in.readInt();
 		int terminalCount = in.readInt();
 
 		List<Terminal<?>> terminalsById = new ArrayList<>();
+		terminalsById.add(Terminal.EOF);
 		for(int i = 0; i < terminalCount; i ++)
 			terminalsById.add(deserializeTerminal.apply(in));
 		List<Nonterminal> nonterminalsById = new ArrayList<>();
+		Nonterminal generatedStartNonterminal;
+		if(hasGeneratedStart)
+		{
+			generatedStartNonterminal = new Nonterminal("S");
+			nonterminalsById.add(generatedStartNonterminal);
+		} else
+			generatedStartNonterminal = null;
 		for(int i = 0; i < nonterminalCount; i ++)
 			nonterminalsById.add(deserializeNonterminal.apply(in));
 		List<Symbol> symbolsById = new ArrayList<>(terminalsById);
@@ -245,9 +230,8 @@ public class LRkParserSerializer
 			actionTable.put(actionEntryI, Map.copyOf(actionEntry));
 		}
 
-
 		// serialize() ensures the initial state always gets ID 0
-		return new GenericLRkParser<>(0, gotoTable, actionTable, lookaheadSize);
+		return new GenericLRkParser<>(0, generatedStartNonterminal, gotoTable, actionTable, lookaheadSize);
 	}
 
 	private static void serializeWord(Word word, Map<Symbol, Integer> idsBySymbol, DataOutputStream out) throws IOException
@@ -291,6 +275,63 @@ public class LRkParserSerializer
 			throw new VersionMagicMismatchException(expected, actual, message);
 	}
 
+	public static record Symbols(Set<Nonterminal> nonterminalsExceptGeneratedStart, Set<Terminal<?>> terminals, Optional<Nonterminal> generatedStartSymbol)
+	{}
+
+	public static Symbols categorizeSymbols(GenericLRkParser<?> parser)
+	{
+		return categorizeSymbols(streamSymbolsExceptGeneratedStartAndEOF(parser), Optional.ofNullable(parser.getGeneratedStartSymbolIfAny()));
+	}
+
+	public static Symbols categorizeSymbols(ContextFreeGrammar grammar)
+	{
+		return categorizeSymbols(grammar.getAllSymbols().stream(), null);
+	}
+
+	public static Symbols categorizeSymbols(Stream<Symbol> symbols, Optional<Nonterminal> generatedStartSymbol)
+	{
+		Set<Nonterminal> nonterminals = new HashSet<>();
+		Set<Terminal<?>> terminals = new HashSet<>();
+		for(Symbol symbol : (Iterable<Symbol>) symbols::iterator)
+			switch(symbol.getType())
+			{
+				case NONTERMINAL -> nonterminals.add((Nonterminal) symbol);
+				case TERMINAL -> terminals.add((Terminal<?>) (Terminal<?>) symbol);
+			}
+		return new Symbols(nonterminals, terminals, generatedStartSymbol);
+	}
+
+	private static <STATE> Stream<Symbol> streamSymbolsExceptGeneratedStartAndEOF(GenericLRkParser<STATE> parser)
+	{
+		Stream<Symbol> allSymbols = Stream.concat(
+				parser
+						.getActionTable()
+						.values()
+						.stream()
+						.map(Map::entrySet)
+						.flatMap(Set::stream)
+						.flatMap(e -> Stream.concat(e.getKey().getTerminals().stream(), switch(e.getValue().getType())
+						{
+							case ERROR, SHIFT -> Stream.empty();
+							case REDUCE -> streamProductionSymbols(((ReduceAction) e.getValue()).getProduction());
+							case FINISH -> streamProductionSymbols(((FinishAction) e.getValue()).getProduction());
+						})),
+				parser
+						.getGotoTable()
+						.values()
+						.stream()
+						.map(Map::keySet)
+						.flatMap(Set::stream))
+				.filter(s -> !s.equals(Terminal.EOF));
+		Nonterminal generatedStartSymbol = parser.getGeneratedStartSymbolIfAny();
+		if(generatedStartSymbol == null)
+			return allSymbols;
+		return allSymbols.filter(s -> !s.equals(generatedStartSymbol));
+	}
+	private static Stream<Symbol> streamProductionSymbols(Production production)
+	{
+		return Stream.concat(Stream.of(production.getLhs()), production.getRhs().getSymbols().stream());
+	}
 	private LRkParserSerializer()
 	{}
 }

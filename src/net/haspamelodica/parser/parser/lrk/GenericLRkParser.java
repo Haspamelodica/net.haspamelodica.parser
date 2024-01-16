@@ -5,6 +5,7 @@ import java.util.Map.Entry;
 import java.util.stream.Collectors;
 
 import net.haspamelodica.parser.ast.InnerNode;
+import net.haspamelodica.parser.grammar.Nonterminal;
 import net.haspamelodica.parser.grammar.Symbol;
 import net.haspamelodica.parser.parser.ParseException;
 import net.haspamelodica.parser.parser.Parser;
@@ -14,13 +15,16 @@ import net.haspamelodica.parser.tokenizer.TokenStream;
 public class GenericLRkParser<STATE> implements Parser
 {
 	private final STATE								initialState;
+	private final Nonterminal						generatedStartSymbolIfAny;
 	private final Map<STATE, Map<Symbol, STATE>>	gotoTable;
 	private final Map<STATE, Map<Word, Action>>		actionTable;
 	private final int								lookaheadSize;
 
-	public GenericLRkParser(STATE initialState, Map<STATE, Map<Symbol, STATE>> gotoTable, Map<STATE, Map<Word, Action>> actionTable, int lookaheadSize)
+	public GenericLRkParser(STATE initialState, Nonterminal generatedStartSymbolIfAny,
+			Map<STATE, Map<Symbol, STATE>> gotoTable, Map<STATE, Map<Word, Action>> actionTable, int lookaheadSize)
 	{
 		this.initialState = initialState;
+		this.generatedStartSymbolIfAny = generatedStartSymbolIfAny;
 		this.gotoTable = deepCopy(gotoTable);
 		this.actionTable = deepCopy(actionTable);
 		this.lookaheadSize = lookaheadSize;
@@ -40,6 +44,10 @@ public class GenericLRkParser<STATE> implements Parser
 	public STATE getInitialState()
 	{
 		return initialState;
+	}
+	public Nonterminal getGeneratedStartSymbolIfAny()
+	{
+		return generatedStartSymbolIfAny;
 	}
 	public Map<STATE, Map<Symbol, STATE>> getGotoTable()
 	{
