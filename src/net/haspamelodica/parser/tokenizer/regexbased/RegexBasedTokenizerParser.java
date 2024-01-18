@@ -1,10 +1,12 @@
 package net.haspamelodica.parser.tokenizer.regexbased;
 
+import java.lang.reflect.Type;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import net.haspamelodica.parser.ast.InnerNode;
+import net.haspamelodica.parser.generics.ParameterizedTypeImpl;
 import net.haspamelodica.parser.generics.TypedFunction;
 import net.haspamelodica.parser.grammar.attributes.Attribute;
 import net.haspamelodica.parser.grammar.attributes.evaluating.lattributed.LAttributedEvaluator;
@@ -25,8 +27,8 @@ public class RegexBasedTokenizerParser
 {
 	private static final String attributeGrammarString = """
 			Regexes
-			 -> WS                  {regexes[-1] = emptyList(); }
-			  | Regexes NRegex WS   {regexes[-1] = listAdd(regexes[0], regex[1]); } ;
+			 -> WS                  {regexes[-1] = emptyNRList(); }
+			  | Regexes NRegex WS   {regexes[-1] = addNRList(regexes[0], regex[1]); } ;
 			NRegex
 			 -> Ident WS '='
 			    WS RegexWS ';'      {regex[-1] = newNamedRegex(string[0], compileRegex(string[4])); }
@@ -71,12 +73,15 @@ public class RegexBasedTokenizerParser
 				CharGroupAndTerminal.build('\\'),
 				CharGroupAndTerminal.buildAll("c")));
 
+		Type T_ListNamedRegex = new ParameterizedTypeImpl(null, List.class, NamedRegex.class);
+
 		Map<String, TypedFunction> functions = Map.of(
 				"charToString", TypedFunction.build(c -> c.toStringNoEscaping(), String.class, Char.class),
 				"emptyString", TypedFunction.build(() -> "", String.class),
 				"concat", TypedFunction.build(String::concat, String.class, String.class, String.class),
-				"emptyList", TypedFunction.build(List::of, List.class),
-				"listAdd", TypedFunction.build(CollectionsUtils::pseudoAdd, List.class, List.class, NamedRegex.class),
+				"emptyNRList", TypedFunction.buildT(List::of, T_ListNamedRegex),
+				"addNRList", TypedFunction.<List<NamedRegex>, NamedRegex, List<NamedRegex>> buildT(
+						CollectionsUtils::pseudoAdd, T_ListNamedRegex, T_ListNamedRegex, NamedRegex.class),
 				"compileRegex", TypedFunction.build(t ->
 				{
 					try
